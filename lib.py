@@ -43,12 +43,10 @@ def avg_tiles(source, target, env):
         with rasterio.open(str(source[nmonths+i])) as rast:
             monthcount = rast.read(1)
         if i == 0:
-            cumsum = monthavg.copy()
             cumcount = monthcount.copy()
-            cumsum[cumcount==0] = 0
+            cumsum = monthavg.copy() * cumcount
         else:
-            monthavg[monthcount==0] = 0
-            cumsum += monthavg
+            cumsum += monthavg * monthcount
             cumcount += monthcount
     avg = np.zeros_like(cumsum) * np.nan
     avg[cumcount>0] = cumsum[cumcount>0] / cumcount[cumcount>0]
