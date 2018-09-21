@@ -10,6 +10,8 @@ def find_files(viirsdir):
     tuples = []
     tiftypes = set()
     for dirpath, dirnames, filenames in os.walk(viirsdir):
+        if len(os.path.basename(dirpath)) == 4: # only do YYYYMM directories
+            continue
         for filename in filenames:
             if filename[-4:] == '.tgz':
                 continue
@@ -51,12 +53,24 @@ def avg_tiles(source, target, env):
     avg = np.zeros_like(cumsum) * np.nan
     avg[cumcount>0] = cumsum[cumcount>0] / cumcount[cumcount>0]
     avg[avg<0] = 0
+    avg[np.isnan(avg)] = 0
 
     with rasterio.open(str(target[0]), 'w', **meta) as out:
         out.write(avg, 1)
+    countmeta = meta.copy()
+    countmeta['dtype'] = 'uint8'
+    with rasterio.open(str(target[1]), 'w', **countmeta) as out:
+        out.write(cumcount, 1)
     return 0
 
 
-
+def write_grdImport_input(source, target, env):
+    with open(str(target[0]), 'w') as fout:
+            fout.write(str(env['dataformat']) + '\n')
+            fout.write(str(env['nodata']) + '\n')
+            fout.write(str(env['listfile']) + '\n')
+            fout.write(env['outputfile'] + '\n')
+            fout.write(str(env['gridtype']) + '\n')
+    return 0
 
 
