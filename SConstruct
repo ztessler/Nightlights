@@ -61,7 +61,8 @@ tifs = lib.find_files(viirsdir)
 # compute annual composite tiles
 years = sorted(set(tifs.index.get_level_values('year')))
 tiles = sorted(set(tifs.index.get_level_values('tile')))
-for year in [2014,2015]: #years[:1]:
+#for year in [2014,2015]:
+for year in years:
     annualtiles = []
     for tile in tiles:
         avgs = tifs.loc[year, :, tile, 'avg'].tolist()

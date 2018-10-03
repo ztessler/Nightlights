@@ -59,8 +59,9 @@ def avg_tiles(source, target, env):
         out.write(avg, 1)
     countmeta = meta.copy()
     countmeta['dtype'] = 'uint8'
+    assert np.all(cumcount == cumcount.astype(countmeta['dtype']))
     with rasterio.open(str(target[1]), 'w', **countmeta) as out:
-        out.write(cumcount, 1)
+        out.write(cumcount.astype(countmeta['dtype']), 1)
     return 0
 
 
