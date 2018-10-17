@@ -4,6 +4,7 @@ SERVER="https://ngdc.noaa.gov"
 BASEDIR="eog/data/web_data/v4composites/"
 PATTERN_TAR="F*.v4.tar"
 PATTERN_STABLE="F*.stable_lights.avg_vis.tif.gz"
+PATTERN_CVG="F*.cf_cvg.tif.gz"
 
 wget -e robots=off -r --no-parent -nc -nH --cut-dirs=4 -P $SAVEDIR -A $PATTERN_TAR ${SERVER}/${BASEDIR}
 
@@ -11,4 +12,5 @@ wget -e robots=off -r --no-parent -nc -nH --cut-dirs=4 -P $SAVEDIR -A $PATTERN_T
 find ${SAVEDIR} -name "${PATTERN_TAR}" -execdir tar -xkf {} \;
 
 find ${SAVEDIR} -name "${PATTERN_STABLE}" -execdir gunzip -kdf {} \;
+find ${SAVEDIR} -name "${PATTERN_CVG}" -execdir gunzip -kdf {} \;
 
