@@ -4,6 +4,22 @@
 ### TO RUN:
 #
 
+### NOTES
+# Preprocesses nighttime-lights data. multiple sources:
+#   - DMSP-OLS
+#       older, lower res, but available back many years
+#   - VIIRS, processed data from Earth Observations Group at NOAA/NCEI
+#       Monthly composites available from 2012-2018
+#       Annual composites still being developed
+#       Cleaned, but still substaintial noise/errors from sun/moon glint, clouds, ...
+#   - VIIRS, Black Marble VNP46, Roman et al., 2018, Remote Sens of Envi.
+#       More complete cleaning, best product, currently available for 2012 and 2016
+#       more soon (early 2019), will be on LADAAC
+# Prefer data in this order:
+#   VIIRS BlackMarble
+#   VIIRS EOG
+#   DMSP-OLS
+
 import os
 import sys
 import hashlib
@@ -48,41 +64,115 @@ elif STNunits == 'sec':
 else:
     raise NotImplementedError
 
+
 work = 'work'
 output = 'output'
 RGISlocal = '../WBM/RGISlocal'
 
-# VIIRS data download and untar with get_VIIRS_data.sh
-#   get month list
-viirsdir = '/Users/ecr/ztessler/data/Nightlights/VIIRS'
-viirsproc = '/Users/ecr/ztessler/data/Nightlights/processed/VIIRS'
-tifs = lib.find_files(viirsdir)
+# DMSP-OLS data download with get_DMSP_OLS_data.sh
+#   some years have multiple satellies, average them
+#   get year, instrument list
+dmspdir = '/Users/ecr/ztessler/data/Nightlights/DMSP_OLS'
+dmspproc = '/Users/ecr/ztessler/data/Nightlights/processed/DMSP_OLS'
+dmsptifs = lib.find_dmsp_files(dmspdir)
+#dmsp_years = range(1992, 2013+1)[:1]
+dmsp_years = sorted(set(dmsptifs.index.get_level_values('year')))
 
-# compute annual composite tiles
-years = sorted(set(tifs.index.get_level_values('year')))
-tiles = sorted(set(tifs.index.get_level_values('tile')))
-#for year in [2014,2015]:
-for year in years:
-    annualtiles = []
-    for tile in tiles:
-        avgs = tifs.loc[year, :, tile, 'avg'].tolist()
-        count = tifs.loc[year, :, tile, 'cf'].tolist()
-        annualtile = os.path.join(viirsproc, 'annual', str(year), 'viirs_nightlights_{0}_{1}.tif'.format(year, tile))
-        annualcounts = os.path.join(viirsproc, 'annual', str(year), 'viirs_nightlights_counts_{0}_{1}.tif'.format(year, tile))
+# DMSP-OLS data is not calibrated to radiance. see Hsu 2015 Remote Sensing for approximate calibrations
+# DMSP Radiance Calibrated product is available from NOAA, though they warn the calibration is
+# approximate due to sensor drift. Data need to be adjust interannually for comparison, then
+# converted to radiance. Get data with get_DMSP_RadCal_data.sh
+radcaldir = '/Users/ecr/ztessler/data/Nightlights/DMSP_RadCal'
+radcalproc = '/Users/ecr/ztessler/data/Nightlights/processed/DMSP_RadCal'
+radcaltifs = lib.find_radcal_files(radcaldir)
+radcal_years = sorted(set(radcaltifs.index.get_level_values('year')))
+
+
+# VIIRS EOG data download and untar with get_VIIRS_eog_data.sh
+#   get month list
+eogdir = '/Users/ecr/ztessler/data/Nightlights/VIIRS_EOG'
+eogproc = '/Users/ecr/ztessler/data/Nightlights/processed/VIIRS_EOG'
+eogtifs = lib.find_files(eogdir)
+#eog_years = range(2012, 2018+1)[1:2]
+eog_years = sorted(set(eogtifs.index.get_level_values('year')))
+
+# VIIRS Black Marble data download with get_VIIRS_blackmarble_data.sh
+# black marble version is processed to remove far more sources of noise, including moonglint, clouds, ...
+# better source, but not all years available yet (just 2012 and 2016)
+#   get month list
+bmdir = '/Users/ecr/ztessler/data/Nightlights/VIIRS_BlackMarble'
+bmproc = '/Users/ecr/ztessler/data/Nightlights/processed/VIIRS_BlackMarble'
+bmtifs = lib.find_bm_files(bmdir)
+#bm_years = [2012, 2016][:1]
+bm_years = sorted(set(bmtifs.index.get_level_values('year')))
+
+# overwrite dict values to prefer bm, then eog, then dmsp
+years = {}
+for source, sourceyears in [
+                            #('dmsp', dmsp_years),
+                            ('radcal', radcal_years),
+                            ('eog', eog_years),
+                            #('bm', bm_years),
+                            ]:
+    for year in sourceyears:
+        years[year] = source
+
+startyear = min(years)
+endyear = max(years)
+
+for year, source in years.items():
+    if source == 'bm':
+        bmannualtiles = bmtifs[year].tolist()
+        annual = os.path.join(bmproc, str(year), 'viirs_bm_nightlights_{0}.tif'.format(year))
+        env.Command(
+                source=bmannualtiles,
+                target=annual,
+                action=['gdal_merge.py -o ${TARGET}.3bands -of GTiff -v $SOURCES',
+                        'gdal_translate -b 1 ${TARGET}.3bands $TARGET']) # merge, then just take first band (rgb are all the same)
+
+    elif source == 'eog':
+        # compute eog annual composite tiles
+        tiles = sorted(set(eogtifs[year].index.get_level_values('tile')))
+        eogannualtiles = []
+        for tile in tiles:
+            avgs = eogtifs.loc[year, :, tile, 'avg'].tolist()
+            count = eogtifs.loc[year, :, tile, 'cf'].tolist()
+            annualtile = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_{0}_{1}.tif'.format(year, tile))
+            annualcounts = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_counts_{0}_{1}.tif'.format(year, tile))
+            env.Command(
+                    source=avgs+count,
+                    target=[annualtile, annualcounts],
+                    action=lib.avg_eog_tiles,
+                    nmonths=len(avgs))
+            eogannualtiles.append(annualtile)
+
+        annual = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_{0}.tif'.format(year))
+        env.Command(
+                source=eogannualtiles,
+                target=annual,
+                action='gdal_merge.py -o $TARGET -of GTiff -v $SOURCES')
+
+    elif source == 'radcal':
+        # already annual global raster, but need to calibrate it
+        annual = os.path.join(radcalproc, str(year), 'dmsp_radcal_nightlights_{0}.tif'.format(year))
+        env.Command(
+                source=radcaltifs[year, 'avg_vis'],
+                target=annual,
+                action=lib.calibrate_radcal)
+        pass
+    elif source == 'dmsp':
+        # compute dmsp annual composite if more than one satellite for this year
+        avgs = dmsptifs.loc[year, :, 'stable_lights'].tolist()
+        count = dmsptifs.loc[year, :, 'cf_cvg'].tolist()
+        annual = os.path.join(dmspproc, str(year), 'dmsp_ols_nightlights_{0}.tif'.format(year))
+        annualcounts = os.path.join(dmspproc, str(year), 'dmsp_ols_nightlights_counts_{0}.tif'.format(year))
         env.Command(
                 source=avgs+count,
-                target=[annualtile, annualcounts],
-                action=lib.avg_tiles,
-                nmonths=len(avgs))
-        annualtiles.append(annualtile)
+                target=[annual, annualcounts],
+                action=lib.avg_dmsp_sats,
+                nsats=len(avgs))
 
-    annual = os.path.join(viirsproc, 'annual', str(year), 'viirs_nightlights_{0}.tif'.format(year))
-    env.Command(
-            source=annualtiles,
-            target=annual,
-            action='gdal_merge.py -o $TARGET -of GTiff -v $SOURCES')
-
-    downscale = os.path.join(work, 'viirs_{0}_{1}.tif'.format(year, STNres))
+    downscale = os.path.join(work, 'nightlights_{0}_{1}.tif'.format(year, STNres))
     env.Command(
             source=annual,
             target=downscale,
@@ -112,18 +202,19 @@ for year in years:
             action=['grdImport -b ${SOURCES[0]} < ${SOURCES[1]}',
                     'setHeader -u Nightlights -t Nightlights -d Global ${TARGETS[0]} ${TARGETS[1]}'])
 
-    rgis = os.path.join(output, 'Global_Nightlights_VIIRS_{0}_aTS{1}.gdbc'.format(STNres, year))
+    rgis = os.path.join(output, 'Global_Nightlights_DMSPorVIIRS_{0}_aTS{1}.gdbc'.format(STNres, year))
     env.Command(
             source=rgis1,
             target=rgis,
             action='grdDateLayers -y {0} -e year -s blue-to-red $SOURCE $TARGET'.format(year))
 
-    RGISlocal_gdbc = os.path.join(RGISlocal, 'Global/Nightlights/VIIRS/{0}/Annual'.format(STNres), os.path.basename(rgis))
+    RGISlocal_gdbc = os.path.join(RGISlocal, 'Global/Nightlights/DMSPorVIIRS/{0}/Annual'.format(STNres), os.path.basename(rgis))
     final = env.Command(
             source=rgis,
             target=RGISlocal_gdbc,
             action='cp $SOURCE $TARGET')
     env.Default(final)
+
 
 
 
