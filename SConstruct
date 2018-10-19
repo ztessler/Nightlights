@@ -111,12 +111,11 @@ years = {}
 for source, sourceyears in [
                             #('dmsp', dmsp_years),
                             ('radcal', radcal_years),
-                            ('eog', eog_years),
+                            #('eog', eog_years),
                             #('bm', bm_years),
                             ]:
     for year in sourceyears:
         years[year] = source
-
 startyear = min(years)
 endyear = max(years)
 
@@ -215,7 +214,15 @@ for year, source in years.items():
             action='cp $SOURCE $TARGET')
     env.Default(final)
 
+### For now, just use DMSP_RadCal
+### later, when black marble radiance calibrated data is available, do adjustments to match timeseries
+### as:
+# interpolate data to missing years within each data source
+
+# extrapolate (constant) data to get overlap between dmsp_radcap and viirs
+
+# adjust nightlights data from dmsp_radcal to match global means from viirs for years they overlap
+#   compute global mean radiance, scale dmsp_radcal to match viirs
+#   apply scaling factor to all dmsp_radcal years
 
 
-
-# DMSP-OLS
