@@ -109,110 +109,114 @@ bm_years = sorted(set(bmtifs.index.get_level_values('year')))
 # overwrite dict values to prefer bm, then eog, then dmsp
 years = {}
 for source, sourceyears in [
-                            #('dmsp', dmsp_years),
+                            ('dmsp', dmsp_years),
                             ('radcal', radcal_years),
-                            #('eog', eog_years),
-                            #('bm', bm_years),
+                            ('eog', eog_years),
+                            ('bm', bm_years),
                             ]:
+    #for year in sourceyears:
+        #years[year] = source
+
     for year in sourceyears:
-        years[year] = source
-startyear = min(years)
-endyear = max(years)
+        if source == 'bm':
+            sourcename = 'VIIRS-BM'
+            bmannualtiles = bmtifs[year].tolist()
+            annual = os.path.join(bmproc, str(year), 'viirs_bm_nightlights_{0}.tif'.format(year))
+            env.Command(
+                    source=bmannualtiles,
+                    target=annual,
+                    action=['gdal_merge.py -o ${TARGET}.3bands -of GTiff -v $SOURCES',
+                            'gdal_translate -b 1 ${TARGET}.3bands $TARGET']) # merge, then just take first band (rgb are all the same)
 
-for year, source in years.items():
-    if source == 'bm':
-        bmannualtiles = bmtifs[year].tolist()
-        annual = os.path.join(bmproc, str(year), 'viirs_bm_nightlights_{0}.tif'.format(year))
-        env.Command(
-                source=bmannualtiles,
-                target=annual,
-                action=['gdal_merge.py -o ${TARGET}.3bands -of GTiff -v $SOURCES',
-                        'gdal_translate -b 1 ${TARGET}.3bands $TARGET']) # merge, then just take first band (rgb are all the same)
+        elif source == 'eog':
+            # compute eog annual composite tiles
+            sourcename = 'VIIRS-EOG'
+            tiles = sorted(set(eogtifs[year].index.get_level_values('tile')))
+            eogannualtiles = []
+            for tile in tiles:
+                avgs = eogtifs.loc[year, :, tile, 'avg'].tolist()
+                count = eogtifs.loc[year, :, tile, 'cf'].tolist()
+                annualtile = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_{0}_{1}.tif'.format(year, tile))
+                annualcounts = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_counts_{0}_{1}.tif'.format(year, tile))
+                env.Command(
+                        source=avgs+count,
+                        target=[annualtile, annualcounts],
+                        action=lib.avg_eog_tiles,
+                        nmonths=len(avgs))
+                eogannualtiles.append(annualtile)
 
-    elif source == 'eog':
-        # compute eog annual composite tiles
-        tiles = sorted(set(eogtifs[year].index.get_level_values('tile')))
-        eogannualtiles = []
-        for tile in tiles:
-            avgs = eogtifs.loc[year, :, tile, 'avg'].tolist()
-            count = eogtifs.loc[year, :, tile, 'cf'].tolist()
-            annualtile = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_{0}_{1}.tif'.format(year, tile))
-            annualcounts = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_counts_{0}_{1}.tif'.format(year, tile))
+            annual = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_{0}.tif'.format(year))
+            env.Command(
+                    source=eogannualtiles,
+                    target=annual,
+                    action='gdal_merge.py -o $TARGET -of GTiff -v $SOURCES')
+
+        elif source == 'radcal':
+            # already annual global raster, but need to calibrate it
+            sourcename = 'DMSP-RadCal'
+            annual = os.path.join(radcalproc, str(year), 'dmsp_radcal_nightlights_{0}.tif'.format(year))
+            env.Command(
+                    source=radcaltifs[year, 'avg_vis'],
+                    target=annual,
+                    action=lib.calibrate_radcal)
+            pass
+        elif source == 'dmsp':
+            # compute dmsp annual composite if more than one satellite for this year
+            sourcename = 'DMSP'
+            avgs = dmsptifs.loc[year, :, 'stable_lights'].tolist()
+            count = dmsptifs.loc[year, :, 'cf_cvg'].tolist()
+            annual = os.path.join(dmspproc, str(year), 'dmsp_ols_nightlights_{0}.tif'.format(year))
+            annualcounts = os.path.join(dmspproc, str(year), 'dmsp_ols_nightlights_counts_{0}.tif'.format(year))
             env.Command(
                     source=avgs+count,
-                    target=[annualtile, annualcounts],
-                    action=lib.avg_eog_tiles,
-                    nmonths=len(avgs))
-            eogannualtiles.append(annualtile)
+                    target=[annual, annualcounts],
+                    action=lib.avg_dmsp_sats,
+                    nsats=len(avgs))
 
-        annual = os.path.join(eogproc, str(year), 'viirs_eog_nightlights_{0}.tif'.format(year))
+        downscale = os.path.join(work, source, 'nightlights_{0}_{1}_{2}.tif'.format(source, year, STNres))
         env.Command(
-                source=eogannualtiles,
-                target=annual,
-                action='gdal_merge.py -o $TARGET -of GTiff -v $SOURCES')
+                source=annual,
+                target=downscale,
+                action='gdalwarp -of GTiff -tr {0} {0} -te -180 -65 180 75 -tap -r average $SOURCE $TARGET'.format(res))
 
-    elif source == 'radcal':
-        # already annual global raster, but need to calibrate it
-        annual = os.path.join(radcalproc, str(year), 'dmsp_radcal_nightlights_{0}.tif'.format(year))
+        ascgrid = downscale.replace('tif', 'asc')
         env.Command(
-                source=radcaltifs[year, 'avg_vis'],
-                target=annual,
-                action=lib.calibrate_radcal)
-        pass
-    elif source == 'dmsp':
-        # compute dmsp annual composite if more than one satellite for this year
-        avgs = dmsptifs.loc[year, :, 'stable_lights'].tolist()
-        count = dmsptifs.loc[year, :, 'cf_cvg'].tolist()
-        annual = os.path.join(dmspproc, str(year), 'dmsp_ols_nightlights_{0}.tif'.format(year))
-        annualcounts = os.path.join(dmspproc, str(year), 'dmsp_ols_nightlights_counts_{0}.tif'.format(year))
+                source=downscale,
+                target=ascgrid,
+                action='gdal_translate -of AAIGrid $SOURCE $TARGET')
+
+        grdImport_input = os.path.join(work, source,
+                'grdImport_input_{0}_{1}_{2}.txt'.format(source, year, STNres))
+        rgis0 = ascgrid.replace('asc', '0.gdbc')
+        rgis1 = ascgrid.replace('asc', '1.gdbc')
+        myCommand(
+                source=None,
+                target=grdImport_input,
+                action=lib.write_grdImport_input,
+                dataformat=3,
+                nodata=-9999,
+                listfile=0,
+                outputfile=rgis0,
+                gridtype=1)
         env.Command(
-                source=avgs+count,
-                target=[annual, annualcounts],
-                action=lib.avg_dmsp_sats,
-                nsats=len(avgs))
+                source=[ascgrid, grdImport_input],
+                target=[rgis0, rgis1],
+                action=['grdImport -b ${SOURCES[0]} < ${SOURCES[1]}',
+                        'setHeader -u Nightlights -t Nightlights -d Global ${TARGETS[0]} ${TARGETS[1]}'])
 
-    downscale = os.path.join(work, 'nightlights_{0}_{1}.tif'.format(year, STNres))
-    env.Command(
-            source=annual,
-            target=downscale,
-            action='gdalwarp -of GTiff -tr {0} {0} -te -180 -65 180 75 -tap -r average $SOURCE $TARGET'.format(res))
+        rgis = os.path.join(output, source, 'Global_Nightlights_{0}_{1}_aTS{2}.gdbc'.format(sourcename, STNres, year))
+        env.Command(
+                source=rgis1,
+                target=rgis,
+                action='grdDateLayers -y {0} -e year -s blue-to-red $SOURCE $TARGET'.format(year))
 
-    ascgrid = downscale.replace('tif', 'asc')
-    env.Command(
-            source=downscale,
-            target=ascgrid,
-            action='gdal_translate -of AAIGrid $SOURCE $TARGET')
-
-    grdImport_input = os.path.join(work, 'grdImport_input_{0}_{1}.txt'.format(year, STNres))
-    rgis0 = ascgrid.replace('asc', '0.gdbc')
-    rgis1 = ascgrid.replace('asc', '1.gdbc')
-    myCommand(
-            source=None,
-            target=grdImport_input,
-            action=lib.write_grdImport_input,
-            dataformat=3,
-            nodata=-9999,
-            listfile=0,
-            outputfile=rgis0,
-            gridtype=1)
-    env.Command(
-            source=[ascgrid, grdImport_input],
-            target=[rgis0, rgis1],
-            action=['grdImport -b ${SOURCES[0]} < ${SOURCES[1]}',
-                    'setHeader -u Nightlights -t Nightlights -d Global ${TARGETS[0]} ${TARGETS[1]}'])
-
-    rgis = os.path.join(output, 'Global_Nightlights_DMSPorVIIRS_{0}_aTS{1}.gdbc'.format(STNres, year))
-    env.Command(
-            source=rgis1,
-            target=rgis,
-            action='grdDateLayers -y {0} -e year -s blue-to-red $SOURCE $TARGET'.format(year))
-
-    RGISlocal_gdbc = os.path.join(RGISlocal, 'Global/Nightlights/DMSPorVIIRS/{0}/Annual'.format(STNres), os.path.basename(rgis))
-    final = env.Command(
-            source=rgis,
-            target=RGISlocal_gdbc,
-            action='cp $SOURCE $TARGET')
-    env.Default(final)
+        RGISlocal_gdbc = os.path.join(RGISlocal,
+                'Global/Nightlights/{0}/{1}/Annual'.format(sourcename, STNres), os.path.basename(rgis))
+        final = env.Command(
+                source=rgis,
+                target=RGISlocal_gdbc,
+                action='cp $SOURCE $TARGET')
+        env.Default(final)
 
 ### For now, just use DMSP_RadCal
 ### later, when black marble radiance calibrated data is available, do adjustments to match timeseries
