@@ -109,7 +109,6 @@ def avg_eog_tiles(source, target, env):
         with rasterio.open(str(source[i])) as rast:
             monthavg = rast.read(1)
             meta = rast.meta
-            del meta['transform']
         with rasterio.open(str(source[nmonths+i])) as rast:
             monthcount = rast.read(1)
         if i == 0:
@@ -139,7 +138,6 @@ def avg_dmsp_sats(env, source, target):
         with rasterio.open(str(source[i])) as rast:
             satavg = rast.read(1)
             meta = rast.meta
-            del meta['transform']
         with rasterio.open(str(source[nsats+i])) as rast:
             satcount = rast.read(1)
         if i == 0:
@@ -183,7 +181,6 @@ def calibrate_radcal(source, target, env):
     with rasterio.open(str(source[0])) as rast:
         dn_eq = rast.read(1)
         meta = rast.meta
-        del meta['transform']
     # interannual calibrate to match F16_20051128-20061224_rad_v4
     fname = os.path.basename(str(source[0])).split('.')[0]
     dn_calib = coefs[fname][0] + coefs[fname][1] * dn_eq
