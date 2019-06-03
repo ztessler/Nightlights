@@ -12,7 +12,9 @@ calls shell commands or functions in `lib.py`.
 First download data using `get_*.py` scripts.
 
 Edit hard-coded data directory paths in SConstruct. Then
-run with `scons $STNres
+run with `scons $STNres` where `STNres` is resolution of STN digital river network for final
+output.
+
 ## Sensors:
 
 ### DMSP-OLS
